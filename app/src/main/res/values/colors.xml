@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#FAF7F2</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="ink">#1C1B2E</color>
+    <color name="sub">#7A758F</color>
+    <color name="violet">#6B4EFF</color>
+    <color name="violet_soft">#F1ECFF</color>
+    <color name="coral">#FF7A59</color>
+    <color name="line">#ECE6F5</color>
+    <color name="stage">#0E0E18</color>
+</resources>

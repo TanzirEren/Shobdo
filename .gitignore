@@ -1,0 +1,7 @@
+.gradle/
+build/
+local.properties
+app/src/main/cpp/whisper.cpp/
+app/src/main/assets/models/*.bin
+*.iml
+.idea/

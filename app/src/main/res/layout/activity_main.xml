@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="22dp" android:background="@color/bg">
+
+    <com.tanzirdev.shobdo.WordmarkView
+        android:id="@+id/wordmark" android:layout_width="wrap_content" android:layout_height="52dp" />
+    <TextView
+        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="Offline captions in every language" android:textColor="@color/sub" android:textSize="14sp"
+        android:layout_marginTop="2dp" />
+
+    <FrameLayout
+        android:id="@+id/startCard" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="22dp" android:background="@drawable/bg_gradient" android:padding="22dp"
+        android:clickable="true" android:focusable="true" android:elevation="6dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="New captions" android:textColor="#FFFFFF" android:textSize="26sp"
+                android:fontFamily="sans-serif-medium" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Pick a video. Your phone does the listening.\nNo internet. No limits."
+                android:textColor="#F2ECFF" android:textSize="14sp" android:layout_marginTop="6dp" />
+            <TextView android:id="@+id/startBtn" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginTop="18dp" android:background="@drawable/bg_pill_white"
+                android:paddingHorizontal="22dp" android:paddingVertical="11dp"
+                android:text="Choose video  →" android:textColor="@color/violet" android:textSize="15sp"
+                android:fontFamily="sans-serif-medium" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_marginTop="26dp" android:text="Recent projects" android:textColor="@color/ink"
+        android:textSize="16sp" android:fontFamily="sans-serif-medium" />
+
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/projects" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:paddingTop="10dp" android:clipToPadding="false"
+            android:layoutAnimation="@anim/layout_item_in" />
+        <TextView android:id="@+id/empty" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="center" android:text="Nothing yet — your captions will live here."
+            android:textColor="@color/sub" android:textSize="14sp" />
+    </FrameLayout>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical">
+        <TextView android:id="@+id/modelInfo" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:textColor="@color/sub" android:textSize="12sp" />
+        <TextView android:id="@+id/modelBtn" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:background="@drawable/bg_chip" android:paddingHorizontal="14dp" android:paddingVertical="7dp"
+            android:text="Speech model" android:textColor="@color/violet" android:textSize="12sp" />
+    </LinearLayout>
+</LinearLayout>

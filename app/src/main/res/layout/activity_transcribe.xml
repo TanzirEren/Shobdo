@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:gravity="center" android:padding="32dp" android:background="@color/bg">
+    <com.tanzirdev.shobdo.WordmarkView android:id="@+id/wordmark" android:layout_width="wrap_content" android:layout_height="64dp" />
+    <TextView android:id="@+id/percent" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_marginTop="40dp" android:text="0%" android:textSize="56sp" android:textColor="@color/violet"
+        android:fontFamily="sans-serif-light" />
+    <ProgressBar android:id="@+id/bar" style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent" android:layout_height="8dp" android:layout_marginTop="8dp"
+        android:max="100" android:progressTint="@color/violet" android:progressBackgroundTint="@color/line" />
+    <TextView android:id="@+id/stage" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_marginTop="18dp" android:text="Starting…" android:textSize="15sp" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"
+        android:text="Everything runs on your phone. Keep the app open." android:textColor="@color/sub" android:textSize="12sp" />
+    <TextView android:id="@+id/cancel" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_marginTop="36dp" android:background="@drawable/bg_btn_soft" android:paddingHorizontal="28dp"
+        android:paddingVertical="12dp" android:text="Cancel" android:textColor="@color/violet" />
+</LinearLayout>
