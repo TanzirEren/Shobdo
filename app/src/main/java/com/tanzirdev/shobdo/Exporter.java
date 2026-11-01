@@ -35,7 +35,7 @@ public class Exporter {
     }
 
     /** targetHeight 0 = keep original. Must be called on the main thread. */
-    public static void export(Context c, Project p, int targetHeight, Listener l) {
+    public static Transformer export(Context c, Project p, int targetHeight, Listener l) {
         Uri uri = Uri.parse(p.videoUri);
         int[] sz = videoSize(c, uri);
         int ow = sz[0], oh = sz[1];
@@ -73,5 +73,6 @@ public class Exporter {
             }
         };
         main.postDelayed(poll, 400);
+        return t;
     }
 }

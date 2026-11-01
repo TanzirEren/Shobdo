@@ -6,9 +6,9 @@ on:
     inputs:
       model:
         description: "Whisper model bundled in the APK (offline)"
-        default: "base-q5_1"
+        default: "small-q5_1"
         type: choice
-        options: [ "tiny-q5_1", "base-q5_1", "small-q5_1" ]
+        options: [ "base-q5_1", "small-q5_1", "medium-q5_0", "large-v3-turbo-q5_0" ]
 
 jobs:
   build:
@@ -21,7 +21,7 @@ jobs:
         with: { distribution: temurin, java-version: '17' }
 
       - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
+        with: { python-version: '3.13' }
 
       - name: Android SDK / NDK / CMake
         run: echo y | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.0.12077973" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0" > /dev/null
@@ -30,7 +30,7 @@ jobs:
         run: git clone --depth 1 --branch v1.9.5 https://github.com/ggml-org/whisper.cpp app/src/main/cpp/whisper.cpp
 
       - name: Download offline model (Python)
-        run: python tools/fetch_model.py "${{ github.event.inputs.model || 'base-q5_1' }}"
+        run: python tools/fetch_model.py "${{ github.event.inputs.model || 'small-q5_1' }}"
 
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.7' }

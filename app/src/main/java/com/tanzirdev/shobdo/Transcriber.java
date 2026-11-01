@@ -5,14 +5,20 @@ import android.net.Uri;
 import java.io.*;
 import java.util.*;
 
-/** Full offline pipeline: video -> PCM -> whisper.cpp -> word timing -> caption blocks. */
+/** Offline pipeline: video -> PCM -> language detection -> whisper.cpp -> word timing -> caption blocks. */
 public class Transcriber {
-    public interface Callback { void onStage(String text, int percent); }
+    public static final int STEP_AUDIO = 0, STEP_LANG = 1, STEP_LISTEN = 2, STEP_POLISH = 3;
+
+    public interface Callback {
+        void onStep(int step, String text, int percent);
+        void onLive(String text);
+    }
 
     public static class Options {
         public String lang = "auto", prompt = "";
-        public boolean translate = false, roman = false, removeFillers = false;
+        public boolean translate = false, roman = false, removeFillers = false, mixed = false;
         public int maxWords = 4;
+        public int quality = 0;      // 0 = fast (greedy), 1 = accurate (beam search)
     }
 
     private static volatile boolean cancelled = false;
@@ -29,60 +35,105 @@ public class Transcriber {
             try (InputStream in = c.getAssets().open("models/model.bin"); OutputStream o = new FileOutputStream(f)) {
                 byte[] b = new byte[1 << 16]; int n;
                 while ((n = in.read(b)) > 0) o.write(b, 0, n);
-            } catch (IOException e) { f.delete(); throw new IOException("Model missing. Build with tools/fetch_model.py or import a model."); }
+            } catch (IOException e) { f.delete(); throw new IOException("Speech model missing. Rebuild with a model or import one in Settings."); }
         }
         return f;
     }
 
+    private static int threads() {
+        int n = Runtime.getRuntime().availableProcessors();
+        return Math.max(2, Math.min(6, n >= 8 ? n - 3 : n - 2));
+    }
+
+    /** Peak-normalise so quiet videos are recognised as well as loud ones. */
+    private static void normalise(float[] a) {
+        float peak = 0;
+        for (float v : a) { float x = Math.abs(v); if (x > peak) peak = x; }
+        if (peak < 0.002f) return;
+        float g = Math.min(6f, 0.9f / peak);
+        if (g > 1.05f) for (int i = 0; i < a.length; i++) a[i] *= g;
+    }
+
+    /** Index of the first 100 ms frame that clearly contains sound. */
+    private static int firstVoice(float[] a) {
+        int frame = 1600;
+        for (int i = 0; i + frame < a.length; i += frame) {
+            double s = 0;
+            for (int k = i; k < i + frame; k += 4) s += a[k] * a[k];
+            if (Math.sqrt(s / (frame / 4.0)) > 0.02) return i;
+        }
+        return 0;
+    }
+
     public static Project run(Context c, Uri video, String title, Options o, Callback cb) throws Exception {
         cancelled = false;
-        cb.onStage("Preparing offline model", 2);
+        cb.onStep(STEP_AUDIO, "Reading audio", 2);
         File model = modelFile(c);
-
-        cb.onStage("Reading audio from video", 6);
         float[] audio = AudioDecoder.decode(c, video);
         if (cancelled) throw new Exception("cancelled");
-        if (audio.length < 16000) throw new Exception("Audio is too short");
+        if (audio.length < 8000) throw new Exception("This video has almost no audio.");
+        normalise(audio);
+        cb.onStep(STEP_AUDIO, "Audio ready", 10);
 
-        cb.onStage("Loading speech engine", 12);
+        cb.onStep(STEP_LANG, "Loading speech engine", 12);
         long ctx = WhisperBridge.nativeInit(model.getAbsolutePath());
-        if (ctx == 0) throw new Exception("Could not load model file");
-
-        final boolean[] running = {true};
-        Thread poll = new Thread(() -> {
-            while (running[0]) {
-                int p = WhisperBridge.nativeProgress();
-                cb.onStage("Listening & writing captions", 15 + (int) (p * 0.8));
-                try { Thread.sleep(400); } catch (InterruptedException e) { return; }
-            }
-        });
-        poll.start();
-        String raw;
+        if (ctx == 0) throw new Exception("Could not load the speech model file.");
+        int th = threads();
         try {
-            int threads = Math.max(2, Math.min(6, Runtime.getRuntime().availableProcessors() - 1));
-            raw = WhisperBridge.nativeTranscribe(ctx, audio, o.lang, o.translate, o.prompt, threads);
+            String code = o.lang;
+            if (code.equals("auto")) {
+                cb.onStep(STEP_LANG, "Detecting language", 14);
+                int from = Math.max(0, firstVoice(audio) - 8000);
+                int to = Math.min(audio.length, from + 16000 * 30);
+                code = WhisperBridge.nativeDetect(ctx, Arrays.copyOfRange(audio, from, to), th);
+                if (cancelled) throw new Exception("cancelled");
+            }
+            cb.onStep(STEP_LANG, "Language: " + Languages.nameFor(code), 18);
+
+            boolean nativeScript = Languages.NATIVE.contains(code);
+            boolean suppressLatin = nativeScript && !o.mixed && !o.translate;
+            String prompt = !o.prompt.isEmpty() ? o.prompt : (nativeScript && !o.translate ? Languages.nativePrompt(code) : "");
+            int beam = o.quality == 1 ? 5 : 1;
+
+            final boolean[] running = {true};
+            final String showCode = code;
+            Thread poll = new Thread(() -> {
+                while (running[0]) {
+                    int p = WhisperBridge.nativeProgress();
+                    String live = WhisperBridge.nativePartial();
+                    if (o.roman) live = Transliterator.toRoman(live);
+                    cb.onStep(STEP_LISTEN, "Writing captions", 20 + (int) (p * 0.75));
+                    cb.onLive(live);
+                    try { Thread.sleep(350); } catch (InterruptedException e) { return; }
+                }
+            });
+            poll.start();
+            String raw;
+            try {
+                raw = WhisperBridge.nativeTranscribe(ctx, audio, showCode, o.translate, prompt, th, beam, suppressLatin);
+            } finally { running[0] = false; poll.interrupt(); }
+            if (raw.startsWith("#error")) throw new Exception(raw.substring(raw.indexOf('|') + 1));
+
+            cb.onStep(STEP_POLISH, "Polishing captions", 96);
+            Project p = new Project();
+            p.id = String.valueOf(System.currentTimeMillis());
+            p.title = Storage.cleanTitle(title);
+            p.videoUri = video.toString();
+            p.created = System.currentTimeMillis();
+            p.durationMs = (long) (audio.length / 16.0);
+            p.lang = code;
+            p.captions = build(raw, o);
+            if (p.captions.isEmpty()) throw new Exception("No speech was found. Try the Accurate mode or a bigger model in Settings.");
+            cb.onStep(STEP_POLISH, "Done", 100);
+            return p;
         } finally {
-            running[0] = false; poll.interrupt();
             WhisperBridge.nativeFree(ctx);
         }
-        if (raw.startsWith("#error")) throw new Exception(raw.substring(raw.indexOf('|') + 1));
-
-        cb.onStage("Polishing captions", 97);
-        Project p = new Project();
-        p.id = String.valueOf(System.currentTimeMillis());
-        p.title = title;
-        p.videoUri = video.toString();
-        p.created = System.currentTimeMillis();
-        p.durationMs = (long) (audio.length / 16.0);
-        p.lang = o.lang;
-        p.captions = build(raw, o);
-        return p;
     }
 
     private static final Set<String> FILLERS = new HashSet<>(Arrays.asList("um", "uh", "umm", "uhh", "hmm", "mm", "er", "erm", "ah", "eh"));
 
     static List<Caption> build(String raw, Options o) {
-        // 1) tokens -> words
         List<Caption.Word> words = new ArrayList<>();
         Caption.Word cur = null;
         for (String line : raw.split("\n")) {
@@ -94,14 +145,9 @@ public class Transcriber {
             boolean space = tok.startsWith(" ");
             String clean = tok.trim();
             if (clean.isEmpty()) continue;
-            if (cur == null || space) {
-                cur = new Caption.Word(clean, t0, Math.max(t1, t0));
-                words.add(cur);
-            } else {
-                cur.text += clean; cur.end = Math.max(cur.end, t1);
-            }
+            if (cur == null || space) { cur = new Caption.Word(clean, t0, Math.max(t1, t0)); words.add(cur); }
+            else { cur.text += clean; cur.end = Math.max(cur.end, t1); }
         }
-        // 2) clean + transliterate
         List<Caption.Word> ws = new ArrayList<>();
         for (Caption.Word w : words) {
             if (w.text.matches("^[\\[(].*[\\])]$") && w.text.toLowerCase().contains("blank")) continue;
@@ -109,14 +155,12 @@ public class Transcriber {
             if (o.roman) w.text = Transliterator.toRoman(w.text);
             ws.add(w);
         }
-        // 3) repair timing: monotonic, minimum length
         long prevEnd = 0;
         for (Caption.Word w : ws) {
             if (w.start < prevEnd) w.start = prevEnd;
             if (w.end < w.start + 90) w.end = w.start + 90;
             prevEnd = w.end;
         }
-        // 4) group into caption blocks
         List<Caption> caps = new ArrayList<>();
         Caption c = null; int chars = 0;
         for (Caption.Word w : ws) {

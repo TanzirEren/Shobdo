@@ -7,5 +7,8 @@ public class WhisperBridge {
     static native void nativeFree(long ctx);
     static native int nativeProgress();
     static native void nativeAbort();
-    static native String nativeTranscribe(long ctx, float[] audio, String lang, boolean translate, String prompt, int threads);
+    static native String nativePartial();
+    static native String nativeDetect(long ctx, float[] audio, int threads);
+    static native String nativeTranscribe(long ctx, float[] audio, String lang, boolean translate, String prompt,
+                                          int threads, int beam, boolean suppressLatin);
 }

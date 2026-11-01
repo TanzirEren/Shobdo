@@ -1,14 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Shobdo" parent="Theme.Material3.Light.NoActionBar">
-        <item name="colorPrimary">@color/violet</item>
-        <item name="colorOnPrimary">@android:color/white</item>
-        <item name="colorSurface">@color/surface</item>
+    <style name="Theme.Shobdo" parent="android:Theme.DeviceDefault.NoActionBar">
         <item name="android:windowBackground">@color/bg</item>
-        <item name="android:statusBarColor">@color/bg</item>
-        <item name="android:navigationBarColor">@color/bg</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
-        <item name="android:textColor">@color/ink</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:colorAccent">#B89CFF</item>
+        <item name="android:textColor">#F5F2FF</item>
+        <item name="android:textColorPrimary">#F5F2FF</item>
+        <item name="android:textColorSecondary">#A9A3C7</item>
+        <item name="android:textColorHint">#6F6A8F</item>
+        <item name="android:textColorHighlight">#668B5CFF</item>
+    </style>
+    <style name="Theme.Shobdo.Splash" parent="Theme.Shobdo" />
+
+    <style name="GlassDialog" parent="android:Theme.DeviceDefault.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/bg_dialog</item>
+        <item name="android:textColorPrimary">#F5F2FF</item>
+        <item name="android:textColorSecondary">#A9A3C7</item>
+        <item name="android:textColorHint">#6F6A8F</item>
+        <item name="android:colorAccent">#B89CFF</item>
+    </style>
+
+    <style name="SheetDialog" parent="android:Theme.DeviceDefault.Dialog">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowAnimationStyle">@style/SheetAnim</item>
+    </style>
+    <style name="SheetAnim">
+        <item name="android:windowEnterAnimation">@anim/slide_up</item>
+        <item name="android:windowExitAnimation">@anim/slide_down</item>
     </style>
 </resources>

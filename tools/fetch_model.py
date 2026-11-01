@@ -2,7 +2,7 @@
 """Downloads a multilingual whisper.cpp model into app assets (build-time only)."""
 import os, sys, time, urllib.request
 
-name = sys.argv[1] if len(sys.argv) > 1 else "base-q5_1"
+name = sys.argv[1] if len(sys.argv) > 1 else "small-q5_1"
 url = f"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{name}.bin"
 out_dir = os.path.join(os.path.dirname(__file__), "..", "app", "src", "main", "assets", "models")
 os.makedirs(out_dir, exist_ok=True)

@@ -41,6 +41,12 @@ public class Storage {
         return n.isEmpty() ? "captions" : (n.length() > 60 ? n.substring(0, 60) : n);
     }
 
+    /** "my_video_final" -> "my video final" for display. */
+    public static String cleanTitle(String s) {
+        String t = s == null ? "" : s.replace('_', ' ').replaceAll("\\s+", " ").trim();
+        return t.isEmpty() ? "Untitled video" : t;
+    }
+
     // ---- project persistence (private app storage) ----
     private static File projDir(Context c) { File d = new File(c.getFilesDir(), "projects"); d.mkdirs(); return d; }
 
