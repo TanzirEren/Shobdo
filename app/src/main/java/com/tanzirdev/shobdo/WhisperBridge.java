@@ -7,8 +7,15 @@ public class WhisperBridge {
     static native void nativeFree(long ctx);
     static native int nativeProgress();
     static native void nativeAbort();
-    static native String nativePartial();
+    static native byte[] nativePartial();
     static native String nativeDetect(long ctx, float[] audio, int threads);
-    static native String nativeTranscribe(long ctx, float[] audio, String lang, boolean translate, String prompt,
+    static native byte[] nativeTranscribe(long ctx, float[] audio, String lang, boolean translate, String prompt,
                                           int threads, int beam, boolean suppressLatin);
+
+    /** Live text so far, decoded safely (a half-written character at the end is dropped). */
+    static String partial() {
+        byte[] b = nativePartial();
+        if (b == null) return "";
+        return new String(b, java.nio.charset.StandardCharsets.UTF_8).replace("\uFFFD", "");
+    }
 }

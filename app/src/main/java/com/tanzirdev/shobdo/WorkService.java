@@ -50,12 +50,20 @@ public class WorkService extends Service {
         Intent i = new Intent(c, WorkService.class).setAction(ACTION_TRANSCRIBE).setData(src.getData());
         if (src.getExtras() != null) i.putExtras(src.getExtras());
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        c.startForegroundService(i);
+        try { c.startForegroundService(i); }
+        catch (Throwable e) {                       // never leave the UI waiting for a job that did not start
+            transcribing = false;
+            TListener l = tListener; if (l != null) l.onFail("Could not start background work: " + e.getMessage());
+        }
     }
 
     public static void startExport(Context c, String projectId, int height) {
         exporting = true; exportPct = 0;
-        c.startForegroundService(new Intent(c, WorkService.class).setAction(ACTION_EXPORT).putExtra("id", projectId).putExtra("h", height));
+        try { c.startForegroundService(new Intent(c, WorkService.class).setAction(ACTION_EXPORT).putExtra("id", projectId).putExtra("h", height)); }
+        catch (Throwable e) {
+            exporting = false;
+            EListener l = eListener; if (l != null) l.onFail("Could not start background work: " + e.getMessage());
+        }
     }
 
     public static void cancelAll(Context c) {

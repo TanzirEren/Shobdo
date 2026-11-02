@@ -19,6 +19,7 @@ public class Transcriber {
         public boolean translate = false, roman = false, removeFillers = false, mixed = false;
         public int maxWords = 4;
         public int quality = 0;      // 0 = fast (greedy), 1 = accurate (beam search)
+        public String stripPrompt = "";   // prompt text that must never appear as a caption
     }
 
     private static volatile boolean cancelled = false;
@@ -67,8 +68,9 @@ public class Transcriber {
 
     public static Project run(Context c, Uri video, String title, Options o, Callback cb) throws Exception {
         cancelled = false;
-        cb.onStep(STEP_AUDIO, "Reading audio", 2);
+        cb.onStep(STEP_AUDIO, "Preparing speech model", 2);
         File model = modelFile(c);
+        cb.onStep(STEP_AUDIO, "Reading audio", 5);
         float[] audio = AudioDecoder.decode(c, video);
         if (cancelled) throw new Exception("cancelled");
         if (audio.length < 8000) throw new Exception("This video has almost no audio.");
@@ -100,7 +102,7 @@ public class Transcriber {
             Thread poll = new Thread(() -> {
                 while (running[0]) {
                     int p = WhisperBridge.nativeProgress();
-                    String live = WhisperBridge.nativePartial();
+                    String live = WhisperBridge.partial();
                     if (o.roman) live = Transliterator.toRoman(live);
                     cb.onStep(STEP_LISTEN, "Writing captions", 20 + (int) (p * 0.75));
                     cb.onLive(live);
@@ -108,11 +110,16 @@ public class Transcriber {
                 }
             });
             poll.start();
-            String raw;
+            o.stripPrompt = prompt;
+            byte[] raw;
             try {
                 raw = WhisperBridge.nativeTranscribe(ctx, audio, showCode, o.translate, prompt, th, beam, suppressLatin);
             } finally { running[0] = false; poll.interrupt(); }
-            if (raw.startsWith("#error")) throw new Exception(raw.substring(raw.indexOf('|') + 1));
+            if (raw == null) throw new Exception("The speech engine returned nothing.");
+            if (raw.length > 6 && raw[0] == '#' && raw[1] == 'e') {
+                String msg = new String(raw, java.nio.charset.StandardCharsets.UTF_8);
+                throw new Exception(msg.substring(msg.indexOf('|') + 1).trim());
+            }
 
             cb.onStep(STEP_POLISH, "Polishing captions", 96);
             Project p = new Project();
@@ -133,21 +140,63 @@ public class Transcriber {
 
     private static final Set<String> FILLERS = new HashSet<>(Arrays.asList("um", "uh", "umm", "uhh", "hmm", "mm", "er", "erm", "ah", "eh"));
 
-    static List<Caption> build(String raw, Options o) {
-        List<Caption.Word> words = new ArrayList<>();
-        Caption.Word cur = null;
-        for (String line : raw.split("\n")) {
-            if (line.startsWith("#") || line.isEmpty()) continue;
-            int a = line.indexOf('|'), b = line.indexOf('|', a + 1);
-            if (a < 0 || b < 0) continue;
-            long t0 = Long.parseLong(line.substring(0, a)) * 10, t1 = Long.parseLong(line.substring(a + 1, b)) * 10;
-            String tok = line.substring(b + 1);
-            boolean space = tok.startsWith(" ");
-            String clean = tok.trim();
-            if (clean.isEmpty()) continue;
-            if (cur == null || space) { cur = new Caption.Word(clean, t0, Math.max(t1, t0)); words.add(cur); }
-            else { cur.text += clean; cur.end = Math.max(cur.end, t1); }
+    private static int idx(byte[] b, char c, int from, int to) {
+        for (int i = from; i < to; i++) if (b[i] == (byte) c) return i;
+        return -1;
+    }
+
+    private static long num(byte[] b, int from, int to) {
+        long v = 0; boolean neg = false;
+        for (int i = from; i < to; i++) {
+            if (b[i] == '-') neg = true;
+            else if (b[i] >= '0' && b[i] <= '9') v = v * 10 + (b[i] - '0');
         }
+        return neg ? -v : v;
+    }
+
+    private static void flush(java.io.ByteArrayOutputStream cur, long s, long e, List<Caption.Word> out) {
+        if (cur == null) return;
+        String txt = new String(cur.toByteArray(), java.nio.charset.StandardCharsets.UTF_8).replace("\uFFFD", "").trim();
+        if (!txt.isEmpty()) out.add(new Caption.Word(txt, s, e));
+    }
+
+    /** Test/regroup helper. */
+    static List<Caption> build(String raw, Options o) { return build(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8), o); }
+
+    /**
+     * Parses "t0|t1|token" lines from raw BYTES. Tokens can be partial UTF-8 sequences, so bytes of one word are
+     * joined first and decoded only once the whole word is known.
+     */
+    static List<Caption> build(byte[] raw, Options o) {
+        List<Caption.Word> words = new ArrayList<>();
+        java.io.ByteArrayOutputStream cur = null;
+        long cs = 0, ce = 0;
+        int i = 0, n = raw.length;
+        while (i < n) {
+            int j = i;
+            while (j < n && raw[j] != '\n') j++;
+            if (j > i && raw[i] != '#') {
+                int a = idx(raw, '|', i, j), b = a < 0 ? -1 : idx(raw, '|', a + 1, j);
+                if (a > i && b > a) {
+                    long t0 = num(raw, i, a) * 10, t1 = num(raw, a + 1, b) * 10;
+                    int ts = b + 1;
+                    boolean space = ts < j && raw[ts] == ' ';
+                    int s = ts, e = j;
+                    while (s < e && raw[s] == ' ') s++;
+                    while (e > s && raw[e - 1] == ' ') e--;
+                    if (e > s) {
+                        if (cur == null || space) {
+                            flush(cur, cs, ce, words);
+                            cur = new java.io.ByteArrayOutputStream();
+                            cs = t0; ce = Math.max(t1, t0);
+                        } else ce = Math.max(ce, t1);
+                        cur.write(raw, s, e - s);
+                    }
+                }
+            }
+            i = j + 1;
+        }
+        flush(cur, cs, ce, words);
         List<Caption.Word> ws = new ArrayList<>();
         for (Caption.Word w : words) {
             if (w.text.matches("^[\\[(].*[\\])]$") && w.text.toLowerCase().contains("blank")) continue;
@@ -155,6 +204,16 @@ public class Transcriber {
             if (o.roman) w.text = Transliterator.toRoman(w.text);
             ws.add(w);
         }
+        // collapse runaway repeats (same word 4+ times in a row is a Whisper loop)
+        List<Caption.Word> dd = new ArrayList<>();
+        for (int k = 0; k < ws.size(); ) {
+            int r = k;
+            while (r + 1 < ws.size() && ws.get(r + 1).text.equalsIgnoreCase(ws.get(k).text)) r++;
+            if (r - k + 1 >= 4) { ws.get(k).end = ws.get(r).end; dd.add(ws.get(k)); }
+            else for (int q = k; q <= r; q++) dd.add(ws.get(q));
+            k = r + 1;
+        }
+        ws = dd;
         long prevEnd = 0;
         for (Caption.Word w : ws) {
             if (w.start < prevEnd) w.start = prevEnd;
@@ -173,11 +232,20 @@ public class Transcriber {
             if (newBlock) { c = new Caption(); caps.add(c); chars = 0; }
             c.words.add(w); chars += w.text.length() + 1;
         }
-        for (int i = 0; i < caps.size(); i++) {
-            Caption x = caps.get(i);
+        // drop captions that are just the priming prompt leaking into silence
+        if (!o.stripPrompt.isEmpty()) {
+            String pn = o.stripPrompt.replaceAll("[^\\p{L}\\p{N}\\p{M}]", "");
+            for (Iterator<Caption> it = caps.iterator(); it.hasNext(); ) {
+                Caption x = it.next(); x.syncText();
+                String xn = x.text.replaceAll("[^\\p{L}\\p{N}\\p{M}]", "");
+                if (xn.length() >= 6 && pn.contains(xn)) it.remove();
+            }
+        }
+        for (int ci = 0; ci < caps.size(); ci++) {
+            Caption x = caps.get(ci);
             x.start = x.words.get(0).start;
             x.end = x.words.get(x.words.size() - 1).end;
-            long limit = i + 1 < caps.size() ? caps.get(i + 1).words.get(0).start : x.end + 400;
+            long limit = ci + 1 < caps.size() ? caps.get(ci + 1).words.get(0).start : x.end + 400;
             x.end = Math.min(x.end + 300, Math.max(x.end, limit));
             x.syncText();
         }

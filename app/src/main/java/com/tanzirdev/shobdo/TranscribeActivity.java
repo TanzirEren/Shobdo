@@ -86,6 +86,7 @@ public class TranscribeActivity extends Activity {
         setContentView(root);
 
         // start the job once; re-opening this screen only re-attaches to the running job
+        WorkService.tListener = listener;
         if (!WorkService.transcribing) {
             if (getIntent().getData() == null) { finish(); return; }
             WorkService.startTranscribe(this, getIntent());
@@ -93,7 +94,6 @@ public class TranscribeActivity extends Activity {
             applyStep(WorkService.lastStep, WorkService.lastText, WorkService.lastPct);
             applyLive(WorkService.lastLive);
         }
-        WorkService.tListener = listener;
 
         h.post(new Runnable() { @Override public void run() {
             if (closed) return;

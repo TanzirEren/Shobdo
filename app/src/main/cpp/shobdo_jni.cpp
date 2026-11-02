@@ -35,6 +35,14 @@ static void segment_cb(struct whisper_context *ctx, struct whisper_state *, int 
     }
 }
 
+// Tokens of Bangla/Hindi/Arabic are often PARTIAL UTF-8 sequences, so results must travel as raw bytes
+// (NewStringUTF would corrupt them and swallow the separators).
+static jbyteArray to_bytes(JNIEnv *env, const std::string &s) {
+    jbyteArray a = env->NewByteArray((jsize) s.size());
+    if (a && !s.empty()) env->SetByteArrayRegion(a, 0, (jsize) s.size(), (const jbyte *) s.data());
+    return a;
+}
+
 static void build_mask(whisper_context *ctx) {
     int nv = whisper_n_vocab(ctx);
     whisper_token eot = whisper_token_eot(ctx);
@@ -73,10 +81,10 @@ Java_com_tanzirdev_shobdo_WhisperBridge_nativeProgress(JNIEnv *, jclass) { retur
 JNIEXPORT void JNICALL
 Java_com_tanzirdev_shobdo_WhisperBridge_nativeAbort(JNIEnv *, jclass) { g_abort.store(true); }
 
-JNIEXPORT jstring JNICALL
+JNIEXPORT jbyteArray JNICALL
 Java_com_tanzirdev_shobdo_WhisperBridge_nativePartial(JNIEnv *env, jclass) {
     std::lock_guard<std::mutex> lk(g_mu);
-    return env->NewStringUTF(g_partial.c_str());
+    return to_bytes(env, g_partial);
 }
 
 // Detects the spoken language from a short audio window (no decoding).
@@ -100,11 +108,11 @@ Java_com_tanzirdev_shobdo_WhisperBridge_nativeDetect(JNIEnv *env, jclass, jlong 
 }
 
 // Output: first line "#lang|xx", then one line per token: "t0_cs|t1_cs|token_text".
-JNIEXPORT jstring JNICALL
+JNIEXPORT jbyteArray JNICALL
 Java_com_tanzirdev_shobdo_WhisperBridge_nativeTranscribe(JNIEnv *env, jclass, jlong h, jfloatArray audio,
         jstring lang, jboolean translate, jstring prompt, jint threads, jint beam, jboolean suppressLatin) {
     auto *ctx = (whisper_context *) h;
-    if (!ctx) return env->NewStringUTF("#error|no context");
+    if (!ctx) return to_bytes(env, "#error|no context");
     g_abort.store(false);
     g_progress.store(0);
     g_suppress.store(suppressLatin);
@@ -137,7 +145,7 @@ Java_com_tanzirdev_shobdo_WhisperBridge_nativeTranscribe(JNIEnv *env, jclass, jl
     env->ReleaseStringUTFChars(lang, l);
     env->ReleaseStringUTFChars(prompt, pr);
     g_suppress.store(false);
-    if (rc != 0) return env->NewStringUTF(g_abort.load() ? "#error|cancelled" : "#error|whisper_full failed");
+    if (rc != 0) return to_bytes(env, g_abort.load() ? "#error|cancelled" : "#error|whisper_full failed");
 
     std::string out = "#lang|";
     out += whisper_lang_str(whisper_full_lang_id(ctx));
@@ -157,7 +165,7 @@ Java_com_tanzirdev_shobdo_WhisperBridge_nativeTranscribe(JNIEnv *env, jclass, jl
         }
     }
     g_progress.store(100);
-    return env->NewStringUTF(out.c_str());
+    return to_bytes(env, out);
 }
 
 }
