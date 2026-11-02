@@ -4,16 +4,20 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
     inputs:
-      model:
-        description: "Whisper model bundled in the APK (offline)"
+      general_model:
+        description: "General speech model (English, Hindi, Urdu, Arabic and others)"
         default: "small-q5_1"
         type: choice
-        options: [ "base-q5_1", "small-q5_1", "medium-q5_0", "large-v3-turbo-q5_0" ]
+        options: [ "base-q5_1", "small-q5_1", "medium-q5_0" ]
+      bangla_model:
+        description: "Bangla fine-tuned model (Hugging Face repo, converted automatically). Type none to skip."
+        default: "bangla-speech-processing/BanglaASR"
+        type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -29,8 +33,21 @@ jobs:
       - name: Fetch whisper.cpp (C++ speech engine)
         run: git clone --depth 1 --branch v1.9.5 https://github.com/ggml-org/whisper.cpp app/src/main/cpp/whisper.cpp
 
-      - name: Download offline model (Python)
-        run: python tools/fetch_model.py "${{ github.event.inputs.model || 'small-q5_1' }}"
+      - name: General speech model (Python)
+        run: python tools/fetch_model.py "${{ github.event.inputs.general_model || 'small-q5_1' }}"
+
+      - name: Bangla speech model (Python, convert + quantise)
+        env:
+          BN_REPO: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.bangla_model || 'bangla-speech-processing/BanglaASR' }}
+        run: |
+          if [ "$BN_REPO" != "none" ] && [ -n "$BN_REPO" ]; then
+            python tools/build_bangla_model.py "$BN_REPO" || echo "::warning::Bangla model could not be built. The APK will still build, but Bangla accuracy will be poor."
+          else
+            echo "Bangla model skipped"
+          fi
+
+      - name: Show bundled models
+        run: ls -la app/src/main/assets/models/
 
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.7' }

@@ -266,7 +266,7 @@ public class MainActivity extends Activity {
         LinearLayout model = Ui.section(this, "Speech model");
         modelInfo = text("", 14, Ui.TEXT, false);
         model.addView(modelInfo);
-        model.addView(text("Bigger model = better Bangla. Import ggml-medium-q5_0.bin or ggml-large-v3-turbo-q5_0.bin for best accuracy.", 12, Ui.SUB, false), lp(-2, -2, 0, 6, 0, 8));
+        model.addView(text("Bangla needs a Bangla fine-tuned model (the GitHub workflow bundles one). You can also import any ggml Whisper model; it will be used for every language.", 12, Ui.SUB, false), lp(-2, -2, 0, 6, 0, 8));
         model.addView(Ui.button(this, "Import a model file", false, v -> pickModel()));
         model.addView(Ui.button(this, "Use bundled model", false, v -> { new File(getFilesDir(), "custom.bin").delete(); refreshSettings(); }));
         settingsBox.addView(model);
@@ -305,7 +305,8 @@ public class MainActivity extends Activity {
     private void refreshSettings() {
         if (modelInfo == null) return;
         File custom = new File(getFilesDir(), "custom.bin");
-        modelInfo.setText(custom.exists() ? "Custom model · " + custom.length() / 1000000 + " MB" : "Bundled offline model");
+        modelInfo.setText(custom.exists() ? "Custom model · " + custom.length() / 1000000 + " MB (used for every language)"
+                : "General model: bundled ✓\nBangla model: " + (Transcriber.hasBanglaModel(this) ? "bundled ✓" : "not installed ✗ (Bangla will not work)"));
         accessInfo.setText(Storage.hasAccess(this) ? "Access granted ✓" : "Access needed to save into Shobdo folder");
         accessInfo.setTextColor(Storage.hasAccess(this) ? 0xFF7CE3B0 : 0xFFFFB86B);
         boolean battery = ((android.os.PowerManager) getSystemService(POWER_SERVICE)).isIgnoringBatteryOptimizations(getPackageName());

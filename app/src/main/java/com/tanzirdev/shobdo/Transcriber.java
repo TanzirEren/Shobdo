@@ -25,20 +25,47 @@ public class Transcriber {
     private static volatile boolean cancelled = false;
     public static void cancel() { cancelled = true; WhisperBridge.nativeAbort(); }
 
-    public static File modelFile(Context c) throws IOException {
-        File custom = new File(c.getFilesDir(), "custom.bin");
-        if (custom.exists() && custom.length() > 10_000_000) return custom;
-        File f = new File(c.getFilesDir(), "model.bin");
+    private static boolean hasAsset(Context c, String name) {
+        try { String[] l = c.getAssets().list("models"); if (l != null) for (String s : l) if (s.equals(name)) return true; }
+        catch (IOException ignored) {}
+        return false;
+    }
+
+    private static File copyAsset(Context c, String asset, String outName) throws IOException {
+        File f = new File(c.getFilesDir(), outName);
         long assetLen = -1;
-        try (android.content.res.AssetFileDescriptor fd = c.getAssets().openFd("models/model.bin")) { assetLen = fd.getLength(); }
+        try (android.content.res.AssetFileDescriptor fd = c.getAssets().openFd("models/" + asset)) { assetLen = fd.getLength(); }
         catch (Exception ignored) {}
         if (!f.exists() || (assetLen > 0 && f.length() != assetLen)) {
-            try (InputStream in = c.getAssets().open("models/model.bin"); OutputStream o = new FileOutputStream(f)) {
+            try (InputStream in = c.getAssets().open("models/" + asset); OutputStream o = new FileOutputStream(f)) {
                 byte[] b = new byte[1 << 16]; int n;
                 while ((n = in.read(b)) > 0) o.write(b, 0, n);
-            } catch (IOException e) { f.delete(); throw new IOException("Speech model missing. Rebuild with a model or import one in Settings."); }
+            } catch (IOException e) { f.delete(); throw new IOException("Speech model missing (" + asset + "). Rebuild the app or import a model in Settings."); }
         }
         return f;
+    }
+
+    public static boolean hasBanglaModel(Context c) { return hasAsset(c, "bangla.bin"); }
+
+    /** An imported model (Settings) overrides everything. */
+    private static File custom(Context c) {
+        File f = new File(c.getFilesDir(), "custom.bin");
+        return f.exists() && f.length() > 10_000_000 ? f : null;
+    }
+
+    /** General multilingual model. */
+    public static File generalModel(Context c) throws IOException {
+        File cu = custom(c);
+        if (cu != null) return cu;
+        return copyAsset(c, hasAsset(c, "general.bin") ? "general.bin" : "model.bin", "general.bin");
+    }
+
+    /** Bangla is routed to the Bengali fine-tuned model when it is installed. */
+    public static File modelFor(Context c, String lang) throws IOException {
+        File cu = custom(c);
+        if (cu != null) return cu;
+        if (lang.equals("bn") && hasBanglaModel(c)) return copyAsset(c, "bangla.bin", "bangla.bin");
+        return generalModel(c);
     }
 
     private static int threads() {
@@ -66,10 +93,40 @@ public class Transcriber {
         return 0;
     }
 
+    private static Character.UnicodeScript scriptFor(String code) {
+        switch (code) {
+            case "bn": return Character.UnicodeScript.BENGALI;
+            case "hi": case "mr": case "ne": return Character.UnicodeScript.DEVANAGARI;
+            case "ur": case "ar": case "fa": return Character.UnicodeScript.ARABIC;
+            case "ta": return Character.UnicodeScript.TAMIL;
+            case "te": return Character.UnicodeScript.TELUGU;
+            case "gu": return Character.UnicodeScript.GUJARATI;
+            case "pa": return Character.UnicodeScript.GURMUKHI;
+            default: return null;
+        }
+    }
+
+    /** True when the text is mostly in a script that does not belong to the spoken language (= model could not do it). */
+    static boolean wrongScript(String code, List<Caption> caps) {
+        Character.UnicodeScript want = scriptFor(code);
+        if (want == null) return false;
+        int letters = 0, ok = 0;
+        for (Caption c : caps) {
+            for (int i = 0; i < c.text.length(); ) {
+                int cp = c.text.codePointAt(i); i += Character.charCount(cp);
+                if (!Character.isLetter(cp)) continue;
+                letters++;
+                if (Character.UnicodeScript.of(cp) == want) ok++;
+            }
+        }
+        return letters >= 20 && ok < letters * 0.5;
+    }
+
     public static Project run(Context c, Uri video, String title, Options o, Callback cb) throws Exception {
         cancelled = false;
         cb.onStep(STEP_AUDIO, "Preparing speech model", 2);
-        File model = modelFile(c);
+        String wanted = o.lang;
+        File first = wanted.equals("auto") ? generalModel(c) : modelFor(c, wanted);
         cb.onStep(STEP_AUDIO, "Reading audio", 5);
         float[] audio = AudioDecoder.decode(c, video);
         if (cancelled) throw new Exception("cancelled");
@@ -78,7 +135,7 @@ public class Transcriber {
         cb.onStep(STEP_AUDIO, "Audio ready", 10);
 
         cb.onStep(STEP_LANG, "Loading speech engine", 12);
-        long ctx = WhisperBridge.nativeInit(model.getAbsolutePath());
+        long ctx = WhisperBridge.nativeInit(first.getAbsolutePath());
         if (ctx == 0) throw new Exception("Could not load the speech model file.");
         int th = threads();
         try {
@@ -89,16 +146,23 @@ public class Transcriber {
                 int to = Math.min(audio.length, from + 16000 * 30);
                 code = WhisperBridge.nativeDetect(ctx, Arrays.copyOfRange(audio, from, to), th);
                 if (cancelled) throw new Exception("cancelled");
+                File better = modelFor(c, code);               // Bangla -> Bengali model
+                if (!better.equals(first)) {
+                    cb.onStep(STEP_LANG, "Loading " + Languages.nameFor(code) + " model", 16);
+                    WhisperBridge.nativeFree(ctx); ctx = 0;
+                    ctx = WhisperBridge.nativeInit(better.getAbsolutePath());
+                    if (ctx == 0) throw new Exception("Could not load the " + Languages.nameFor(code) + " model.");
+                }
             }
             cb.onStep(STEP_LANG, "Language: " + Languages.nameFor(code), 18);
 
-            boolean nativeScript = Languages.NATIVE.contains(code);
-            boolean suppressLatin = nativeScript && !o.mixed && !o.translate;
-            String prompt = !o.prompt.isEmpty() ? o.prompt : (nativeScript && !o.translate ? Languages.nativePrompt(code) : "");
+            // The mixed-language presets use a prompt that shows Whisper English words are welcome. No other prompt,
+            // no token blocking: forcing a weak model into a script it cannot write only produces garbage.
+            String prompt = o.prompt;
             int beam = o.quality == 1 ? 5 : 1;
 
             final boolean[] running = {true};
-            final String showCode = code;
+            final long fctx = ctx;
             Thread poll = new Thread(() -> {
                 while (running[0]) {
                     int p = WhisperBridge.nativeProgress();
@@ -113,7 +177,7 @@ public class Transcriber {
             o.stripPrompt = prompt;
             byte[] raw;
             try {
-                raw = WhisperBridge.nativeTranscribe(ctx, audio, showCode, o.translate, prompt, th, beam, suppressLatin);
+                raw = WhisperBridge.nativeTranscribe(fctx, audio, code, o.translate, prompt, th, beam, false);
             } finally { running[0] = false; poll.interrupt(); }
             if (raw == null) throw new Exception("The speech engine returned nothing.");
             if (raw.length > 6 && raw[0] == '#' && raw[1] == 'e') {
@@ -122,6 +186,17 @@ public class Transcriber {
             }
 
             cb.onStep(STEP_POLISH, "Polishing captions", 96);
+            // Safety net: never show captions in the wrong script as if they were a result.
+            if (!o.mixed && !o.translate) {
+                Options probe = new Options(); probe.stripPrompt = prompt; probe.maxWords = o.maxWords;
+                List<Caption> native_ = build(raw, probe);
+                if (wrongScript(code, native_)) {
+                    boolean bn = code.equals("bn");
+                    throw new Exception(bn && !hasBanglaModel(c)
+                        ? "This build has no Bangla model. Standard Whisper cannot transcribe Bangla (it writes the wrong script). Rebuild with the Bangla model option in the GitHub workflow, or import a Bangla ggml model in Settings."
+                        : "The speech model could not write " + Languages.nameFor(code) + " properly. Try Accurate mode or a bigger / fine-tuned model in Settings.");
+                }
+            }
             Project p = new Project();
             p.id = String.valueOf(System.currentTimeMillis());
             p.title = Storage.cleanTitle(title);
@@ -134,7 +209,7 @@ public class Transcriber {
             cb.onStep(STEP_POLISH, "Done", 100);
             return p;
         } finally {
-            WhisperBridge.nativeFree(ctx);
+            if (ctx != 0) WhisperBridge.nativeFree(ctx);
         }
     }
 
